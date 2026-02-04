@@ -1,0 +1,102 @@
+-- Fonction pour calculer les KPI métier
+CREATE OR REPLACE FUNCTION get_sales_kpi(
+    p_start_date DATE,
+    p_end_date DATE
+)
+RETURNS TABLE (
+    metric_name VARCHAR(50),
+    metric_value NUMERIC,
+    metric_unit VARCHAR(20)
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        'Total Sales'::VARCHAR,
+        SUM(fs.total_amount),
+        'EUR'::VARCHAR
+    FROM fact_sales fs
+    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+    WHERE dd.date BETWEEN p_start_date AND p_end_date
+    
+    UNION ALL
+    
+    SELECT 
+        'Total Profit',
+        SUM(fs.profit_amount),
+        'EUR'
+    FROM fact_sales fs
+    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+    WHERE dd.date BETWEEN p_start_date AND p_end_date
+    
+    UNION ALL
+    
+    SELECT 
+        'Avg Transaction Value',
+        AVG(fs.total_amount),
+        'EUR'
+    FROM fact_sales fs
+    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+    WHERE dd.date BETWEEN p_start_date AND p_end_date
+    
+    UNION ALL
+    
+    SELECT 
+        'Unique Customers',
+        COUNT(DISTINCT fs.customer_key),
+        'customers'
+    FROM fact_sales fs
+    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+    WHERE dd.date BETWEEN p_start_date AND p_end_date;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Fonction pour mettre à jour les SCD
+CREATE OR REPLACE PROCEDURE update_scd_customer()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Désactiver les anciennes versions
+    UPDATE dim_customer 
+    SET valid_to = CURRENT_TIMESTAMP - INTERVAL '1 second',
+        current_flag = FALSE
+    WHERE current_flag = TRUE
+      AND customer_id IN (
+          SELECT customer_id 
+          FROM dw_silver.silver_customers 
+          WHERE is_active = TRUE
+      );
+    
+    -- Insérer nouvelles versions
+    INSERT INTO dim_customer (
+        customer_id, customer_name, email, city, customer_type,
+        customer_segment, acquisition_date, valid_from, valid_to, current_flag
+    )
+    SELECT 
+        sc.customer_id,
+        sc.first_name || ' ' || sc.last_name,
+        sc.email,
+        sc.city,
+        sc.customer_type,
+        CASE 
+            WHEN sc.customer_type = 'Entreprise' THEN 'Corporate'
+            WHEN sc.city IN ('Paris', 'Lyon') THEN 'Metro'
+            ELSE 'Standard'
+        END,
+        sc.registration_date,
+        CURRENT_TIMESTAMP,
+        '9999-12-31 23:59:59',
+        TRUE
+    FROM dw_silver.silver_customers sc
+    WHERE sc.is_active = TRUE
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM dim_customer dc 
+          WHERE dc.customer_id = sc.customer_id 
+            AND dc.current_flag = TRUE
+            AND dc.email = sc.email
+            AND dc.city = sc.city
+      );
+    
+    RAISE NOTICE 'Dimension Customer SCD mise à jour';
+END;
+$$;
