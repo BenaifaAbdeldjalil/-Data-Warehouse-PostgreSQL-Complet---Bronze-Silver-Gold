@@ -1,0 +1,116 @@
+-------------------------------
+--------------------------------
+------------------Générer Dim_Date
+CREATE OR REPLACE PROCEDURE generate_dim_date(
+    start_date DATE DEFAULT '2024-01-01',
+    end_date DATE DEFAULT '2024-12-31'
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    current_date DATE := start_date;
+BEGIN
+    WHILE current_date <= end_date LOOP
+        INSERT INTO dim_date (
+            date_key, date, day, day_name, month, month_name,
+            quarter, quarter_name, year, is_weekend
+        )
+        VALUES (
+            EXTRACT(YEAR FROM current_date) * 10000 + 
+            EXTRACT(MONTH FROM current_date) * 100 + 
+            EXTRACT(DAY FROM current_date),
+            current_date,
+            EXTRACT(DAY FROM current_date),
+            TO_CHAR(current_date, 'Day'),
+            EXTRACT(MONTH FROM current_date),
+            TO_CHAR(current_date, 'Month'),
+            EXTRACT(QUARTER FROM current_date),
+            'Q' || EXTRACT(QUARTER FROM current_date),
+            EXTRACT(YEAR FROM current_date),
+            EXTRACT(DOW FROM current_date) IN (0, 6)
+        )
+        ON CONFLICT (date_key) DO NOTHING;
+        
+        current_date := current_date + INTERVAL '1 day';
+    END LOOP;
+    
+    RAISE NOTICE 'Dimension Date générée de % à %', start_date, end_date;
+END;
+$$;
+
+CALL generate_dim_date('2024-01-01', '2024-12-31');
+
+-------------------------------
+--------------------------------
+------------------Remplir Dim_Customer depuis Silver
+INSERT INTO dim_customer (
+    customer_id, customer_name, email, city, customer_type,
+    customer_segment, acquisition_date
+)
+SELECT 
+    sc.customer_id,
+    sc.first_name || ' ' || sc.last_name AS customer_name,
+    sc.email,
+    sc.city,
+    sc.customer_type,
+    CASE 
+        WHEN sc.customer_type = 'Entreprise' THEN 'Corporate'
+        WHEN sc.city IN ('Paris', 'Lyon') THEN 'Metro'
+        ELSE 'Standard'
+    END AS customer_segment,
+    sc.registration_date AS acquisition_date
+FROM dw_silver.silver_customers sc
+WHERE sc.is_active = TRUE;
+
+
+------------------------------------------------Remplir Dim_Product depuis Silver
+INSERT INTO dim_product (
+    product_id, product_name, category, brand, supplier,
+    unit_price, cost_price, profit_margin, stock_level, launch_date
+)
+SELECT 
+    sp.product_id,
+    sp.product_name,
+    sp.category,
+    sp.brand,
+    sp.supplier,
+    sp.unit_price,
+    sp.cost_price,
+    CASE 
+        WHEN sp.cost_price > 0 
+        THEN ROUND(((sp.unit_price - sp.cost_price) / sp.cost_price * 100)::NUMERIC, 2)
+        ELSE NULL
+    END AS profit_margin,
+    sp.stock_quantity AS stock_level,
+    sp.release_date AS launch_date
+FROM dw_silver.silver_products sp
+WHERE sp.is_active = TRUE;
+
+
+
+
+
+--------------------------Remplir Dim_Store
+INSERT INTO dim_store (store_id, store_name, store_type, city, region, country)
+VALUES
+('S001', 'Paris Centre', 'Boutique', 'Paris', 'Île-de-France', 'France'),
+('S002', 'Lyon Part-Dieu', 'Boutique', 'Lyon', 'Auvergne-Rhône-Alpes', 'France'),
+('ONLINE', 'Boutique en ligne', 'Online', 'Paris', 'Île-de-France', 'France');
+
+
+
+
+----------------------Remplir Dim_Employee
+INSERT INTO dim_employee (employee_id, employee_name, store_key)
+SELECT 
+    DISTINCT st.employee_id,
+    CASE st.employee_id
+        WHEN 'E001' THEN 'Paul Martin'
+        WHEN 'E002' THEN 'Sophie Bernard'
+        WHEN 'E003' THEN 'Thomas Leroy'
+        ELSE 'Inconnu'
+    END AS employee_name,
+    ds.store_key
+FROM dw_silver.silver_transactions st
+INNER JOIN dim_store ds ON st.store_id = ds.store_id
+WHERE st.employee_id IS NOT NULL;
