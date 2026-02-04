@@ -1,0 +1,38 @@
+CREATE OR REPLACE PROCEDURE generate_dim_date(
+    start_date DATE DEFAULT '2024-01-01',
+    end_date DATE DEFAULT '2024-12-31'
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    current_date DATE := start_date;
+BEGIN
+    WHILE current_date <= end_date LOOP
+        INSERT INTO dim_date (
+            date_key, date, day, day_name, month, month_name,
+            quarter, quarter_name, year, is_weekend
+        )
+        VALUES (
+            EXTRACT(YEAR FROM current_date) * 10000 + 
+            EXTRACT(MONTH FROM current_date) * 100 + 
+            EXTRACT(DAY FROM current_date),
+            current_date,
+            EXTRACT(DAY FROM current_date),
+            TO_CHAR(current_date, 'Day'),
+            EXTRACT(MONTH FROM current_date),
+            TO_CHAR(current_date, 'Month'),
+            EXTRACT(QUARTER FROM current_date),
+            'Q' || EXTRACT(QUARTER FROM current_date),
+            EXTRACT(YEAR FROM current_date),
+            EXTRACT(DOW FROM current_date) IN (0, 6)
+        )
+        ON CONFLICT (date_key) DO NOTHING;
+        
+        current_date := current_date + INTERVAL '1 day';
+    END LOOP;
+    
+    RAISE NOTICE 'Dimension Date générée de % à %', start_date, end_date;
+END;
+$$;
+
+CALL generate_dim_date('2024-01-01', '2024-12-31');
