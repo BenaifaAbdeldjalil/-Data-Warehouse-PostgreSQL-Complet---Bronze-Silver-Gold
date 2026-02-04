@@ -1,0 +1,40 @@
+\c dw_bronze
+
+-- Table 1: Transactions brutes
+CREATE TABLE bronze_transactions (
+    id SERIAL PRIMARY KEY,
+    source_system VARCHAR(50),
+    raw_data JSONB,
+    file_name VARCHAR(255),
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'new'
+);
+
+-- Table 2: Clients bruts
+CREATE TABLE bronze_customers (
+    id SERIAL PRIMARY KEY,
+    source_file VARCHAR(255),
+    customer_data TEXT,
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    import_status VARCHAR(20) DEFAULT 'pending'
+);
+
+-- Table 3: Produits bruts
+CREATE TABLE bronze_products (
+    id SERIAL PRIMARY KEY,
+    api_source VARCHAR(100),
+    json_data JSONB,
+    http_status INTEGER,
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table 4: Logs d'ingestion
+CREATE TABLE bronze_ingestion_log (
+    id SERIAL PRIMARY KEY,
+    table_name VARCHAR(100),
+    operation VARCHAR(50),
+    rows_processed INTEGER,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    error_message TEXT
+);
