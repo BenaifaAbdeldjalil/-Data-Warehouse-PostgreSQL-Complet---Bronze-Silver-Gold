@@ -1,0 +1,21 @@
+SELECT 
+    'transactions' AS table_name, 
+    COUNT(*) AS row_count,
+    MIN(load_date) AS first_load,
+    MAX(load_date) AS last_load
+FROM bronze_transactions
+UNION ALL
+SELECT 
+    'customers', 
+    COUNT(*),
+    MIN(load_date),
+    MAX(load_date)
+FROM bronze_customers
+UNION ALL
+SELECT 
+    'products', 
+    COUNT(*),
+    MIN(load_date),
+    MAX(load_date)
+FROM bronze_products
+ORDER BY table_name;
