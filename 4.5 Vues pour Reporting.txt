@@ -1,0 +1,21 @@
+-- Vue des ventes détaillées
+CREATE VIEW vw_sales_detailed AS
+SELECT 
+    dd.date,
+    dc.customer_name,
+    dc.city AS customer_city,
+    dp.product_name,
+    dp.category,
+    ds.store_name,
+    de.employee_name,
+    fs.transaction_id,
+    fs.quantity,
+    fs.unit_price,
+    fs.discount_amount,
+    fs.total_amount,
+    fs.cost_amount,
+    fs.profit_amount,
+    fs.payment_method
+FROM fact_sales fs
+INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+INNER JOIN dim_customer dc ON fs.customer_key = dc.customer_key
