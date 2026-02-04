@@ -1,0 +1,28 @@
+INSERT INTO fact_sales (
+    date_key, customer_key, product_key, store_key, employee_key,
+    transaction_id, quantity, unit_price, discount_amount, total_amount,
+    cost_amount, profit_amount, payment_method, source_system
+)
+SELECT 
+    dd.date_key,
+    dc.customer_key,
+    dp.product_key,
+    ds.store_key,
+    de.employee_key,
+    st.transaction_id,
+    st.quantity,
+    st.unit_price,
+    st.discount_amount,
+    st.total_amount,
+    -- Calculer CostAmount
+    dp.cost_price * st.quantity AS cost_amount,
+    -- Calculer ProfitAmount
+    st.total_amount - (dp.cost_price * st.quantity) AS profit_amount,
+    st.payment_method,
+    st.source_system
+FROM dw_silver.silver_transactions st
+INNER JOIN dim_date dd ON DATE(st.transaction_date) = dd.date
+INNER JOIN dim_customer dc ON st.customer_sk = dc.customer_key
+INNER JOIN dim_product dp ON st.product_sk = dp.product_key
+INNER JOIN dim_store ds ON st.store_id = ds.store_id
+LEFT JOIN dim_employee de ON st.employee_id = de.employee_id;
