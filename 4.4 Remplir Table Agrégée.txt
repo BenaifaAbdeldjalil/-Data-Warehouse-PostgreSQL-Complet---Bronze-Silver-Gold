@@ -1,0 +1,18 @@
+INSERT INTO agg_daily_sales (
+    date_key, customer_key, product_key, store_key,
+    total_transactions, total_quantity, total_amount,
+    total_cost, total_profit, avg_transaction_value
+)
+SELECT 
+    date_key,
+    customer_key,
+    product_key,
+    store_key,
+    COUNT(*) AS total_transactions,
+    SUM(quantity) AS total_quantity,
+    SUM(total_amount) AS total_amount,
+    SUM(cost_amount) AS total_cost,
+    SUM(profit_amount) AS total_profit,
+    AVG(total_amount) AS avg_transaction_value
+FROM fact_sales
+GROUP BY date_key, customer_key, product_key, store_key;
