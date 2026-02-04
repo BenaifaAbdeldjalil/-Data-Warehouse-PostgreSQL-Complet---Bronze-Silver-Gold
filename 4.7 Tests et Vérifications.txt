@@ -1,0 +1,56 @@
+-- Vérifier les données Gold
+SELECT * FROM vw_daily_sales;
+SELECT * FROM vw_top_customers;
+SELECT * FROM vw_top_products;
+
+-- Tester la fonction KPI
+SELECT * FROM get_sales_kpi('2024-03-15', '2024-03-17');
+
+-- Statistiques complètes
+SELECT 
+    'Bronze' AS layer,
+    COUNT(*) AS total_rows
+FROM dw_bronze.bronze_transactions
+UNION ALL
+SELECT 'Bronze', COUNT(*) FROM dw_bronze.bronze_customers
+UNION ALL
+SELECT 'Bronze', COUNT(*) FROM dw_bronze.bronze_products
+UNION ALL
+SELECT 'Silver', COUNT(*) FROM dw_silver.silver_customers
+UNION ALL
+SELECT 'Silver', COUNT(*) FROM dw_silver.silver_products
+UNION ALL
+SELECT 'Silver', COUNT(*) FROM dw_silver.silver_transactions
+UNION ALL
+SELECT 'Gold', COUNT(*) FROM dw_gold.dim_customer
+UNION ALL
+SELECT 'Gold', COUNT(*) FROM dw_gold.dim_product
+UNION ALL
+SELECT 'Gold', COUNT(*) FROM dw_gold.fact_sales
+ORDER BY layer;
+
+-- Exemple de requête analytique complexe
+WITH monthly_sales AS (
+    SELECT 
+        EXTRACT(YEAR FROM dd.date) AS year,
+        EXTRACT(MONTH FROM dd.date) AS month,
+        dp.category,
+        SUM(fs.total_amount) AS revenue,
+        SUM(fs.profit_amount) AS profit
+    FROM fact_sales fs
+    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+    INNER JOIN dim_product dp ON fs.product_key = dp.product_key
+    GROUP BY EXTRACT(YEAR FROM dd.date), EXTRACT(MONTH FROM dd.date), dp.category
+)
+SELECT 
+    year,
+    month,
+    category,
+    revenue,
+    profit,
+    ROUND((profit / revenue * 100), 2) AS profit_margin_pct,
+    LAG(revenue) OVER (PARTITION BY category ORDER BY year, month) AS prev_month_revenue,
+    ROUND(((revenue - LAG(revenue) OVER (PARTITION BY category ORDER BY year, month)) / 
+           LAG(revenue) OVER (PARTITION BY category ORDER BY year, month) * 100), 2) AS growth_pct
+FROM monthly_sales
+ORDER BY year, month, category;
