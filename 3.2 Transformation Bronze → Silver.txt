@@ -1,0 +1,210 @@
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+----Fonction pour parser les données CSV
+CREATE OR REPLACE FUNCTION parse_customer_data(customer_data TEXT)
+RETURNS TABLE (
+    customer_id VARCHAR,
+    first_name VARCHAR,
+    last_name VARCHAR,
+    email VARCHAR,
+    phone VARCHAR,
+    city VARCHAR,
+    country VARCHAR,
+    registration_date DATE,
+    customer_type VARCHAR
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        (regexp_split_to_array(customer_data, ';'))[1] AS customer_id,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[2], ':'))[2] AS first_name,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[3], ':'))[2] AS last_name,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[4], ':'))[2] AS email,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[5], ':'))[2] AS phone,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[6], ':'))[2] AS city,
+        COALESCE((regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[7], ':'))[2], 'France') AS country,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[8], ':'))[2]::DATE AS registration_date,
+        (regexp_split_to_array((regexp_split_to_array(customer_data, ';'))[9], ':'))[2] AS customer_type;
+END;
+$$ LANGUAGE plpgsql;
+
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+--------------Transformation Clients
+-- Fonction pour transformer les clients
+CREATE OR REPLACE PROCEDURE transform_customers_bronze_to_silver()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    processed_count INTEGER;
+BEGIN
+    -- Insérer les clients nettoyés
+    INSERT INTO silver_customers (
+        customer_id, first_name, last_name, email, phone,
+        city, country, customer_type, registration_date, source_system
+    )
+    SELECT 
+        c.customer_id,
+        INITCAP(TRIM(c.first_name)) AS first_name,
+        INITCAP(TRIM(c.last_name)) AS last_name,
+        LOWER(TRIM(c.email)) AS email,
+        REPLACE(c.phone, ' ', '') AS phone,
+        INITCAP(TRIM(c.city)) AS city,
+        INITCAP(TRIM(c.country)) AS country,
+        c.customer_type,
+        c.registration_date,
+        'crm_system' AS source_system
+    FROM bronze_customers bc
+    CROSS JOIN LATERAL parse_customer_data(bc.customer_data) c
+    WHERE bc.import_status = 'pending'
+      AND c.customer_id IS NOT NULL
+      AND c.first_name IS NOT NULL
+      AND c.last_name IS NOT NULL
+      AND c.email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$';
+    
+    -- Mettre à jour le statut dans bronze
+    UPDATE bronze_customers
+    SET import_status = 'processed'
+    WHERE import_status = 'pending'
+      AND EXISTS (
+          SELECT 1 
+          FROM parse_customer_data(customer_data) c
+          WHERE c.customer_id IS NOT NULL
+      );
+    
+    GET DIAGNOSTICS processed_count = ROW_COUNT;
+    
+    -- Logger l'opération
+    INSERT INTO silver_data_quality (
+        table_name, check_type, check_description, 
+        rows_affected, status
+    ) VALUES (
+        'silver_customers', 'Transformation', 
+        'Transformation clients bronze vers silver',
+        processed_count, 'SUCCESS'
+    );
+    
+    RAISE NOTICE 'Clients transformés : % lignes', processed_count;
+END;
+$$;
+
+-- Exécuter la transformation
+CALL transform_customers_bronze_to_silver();
+
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+--------------------------------------------Transformation Produits
+-- Fonction pour transformer les produits
+CREATE OR REPLACE PROCEDURE transform_products_bronze_to_silver()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    processed_count INTEGER;
+BEGIN
+    INSERT INTO silver_products (
+        product_id, product_name, category, brand, supplier,
+        unit_price, cost_price, stock_quantity, min_stock,
+        reorder_quantity, weight_kg, release_date, source_system
+    )
+    SELECT 
+        json_data->>'product_id' AS product_id,
+        json_data->>'product_name' AS product_name,
+        json_data->>'category' AS category,
+        json_data->>'brand' AS brand,
+        json_data->>'supplier' AS supplier,
+        (json_data->>'unit_price')::DECIMAL(10,2) AS unit_price,
+        (json_data->>'cost_price')::DECIMAL(10,2) AS cost_price,
+        (json_data->>'stock_quantity')::INTEGER AS stock_quantity,
+        (json_data->>'min_stock')::INTEGER AS min_stock,
+        (json_data->>'reorder_quantity')::INTEGER AS reorder_quantity,
+        (json_data->>'weight_kg')::DECIMAL(6,3) AS weight_kg,
+        (json_data->>'release_date')::DATE AS release_date,
+        'product_api' AS source_system
+    FROM bronze_products
+    WHERE http_status = 200
+      AND json_data->>'product_id' IS NOT NULL
+      AND json_data->>'product_name' IS NOT NULL
+      AND (json_data->>'unit_price')::DECIMAL > 0;
+    
+    GET DIAGNOSTICS processed_count = ROW_COUNT;
+    
+    INSERT INTO silver_data_quality (
+        table_name, check_type, check_description,
+        rows_affected, status
+    ) VALUES (
+        'silver_products', 'Transformation',
+        'Transformation produits bronze vers silver',
+        processed_count, 'SUCCESS'
+    );
+    
+    RAISE NOTICE 'Produits transformés : % lignes', processed_count;
+END;
+$$;
+
+CALL transform_products_bronze_to_silver();
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+------------------------------------------Transformation Transactions
+
+-- Fonction pour transformer les transactions
+CREATE OR REPLACE PROCEDURE transform_transactions_bronze_to_silver()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    processed_count INTEGER;
+BEGIN
+    INSERT INTO silver_transactions (
+        transaction_id, customer_sk, product_sk, transaction_date,
+        quantity, unit_price, discount_amount, total_amount,
+        payment_method, store_id, employee_id, source_system
+    )
+    SELECT 
+        bt.raw_data->>'transaction_id' AS transaction_id,
+        sc.customer_sk,
+        sp.product_sk,
+        (bt.raw_data->>'transaction_date')::TIMESTAMP AS transaction_date,
+        (bt.raw_data->>'quantity')::INTEGER AS quantity,
+        (bt.raw_data->>'unit_price')::DECIMAL(10,2) AS unit_price,
+        COALESCE((bt.raw_data->>'discount')::DECIMAL(10,2), 0) AS discount_amount,
+        (bt.raw_data->>'total_amount')::DECIMAL(12,2) AS total_amount,
+        bt.raw_data->>'payment_method' AS payment_method,
+        bt.raw_data->>'store_id' AS store_id,
+        bt.raw_data->>'employee_id' AS employee_id,
+        bt.source_system
+    FROM bronze_transactions bt
+    INNER JOIN silver_customers sc ON bt.raw_data->>'customer_id' = sc.customer_id
+    INNER JOIN silver_products sp ON bt.raw_data->>'product_id' = sp.product_id
+    WHERE bt.status = 'loaded'
+      AND bt.raw_data->>'transaction_id' IS NOT NULL
+      AND (bt.raw_data->>'transaction_date')::TIMESTAMP IS NOT NULL;
+    
+    GET DIAGNOSTICS processed_count = ROW_COUNT;
+    
+    -- Mettre à jour le statut dans bronze
+    UPDATE bronze_transactions
+    SET status = 'processed'
+    WHERE status = 'loaded'
+      AND EXISTS (
+          SELECT 1 
+          FROM silver_customers sc 
+          WHERE raw_data->>'customer_id' = sc.customer_id
+      );
+    
+    INSERT INTO silver_data_quality (
+        table_name, check_type, check_description,
+        rows_affected, status
+    ) VALUES (
+        'silver_transactions', 'Transformation',
+        'Transformation transactions bronze vers silver',
+        processed_count, 'SUCCESS'
+    );
+    
+    RAISE NOTICE 'Transactions transformées : % lignes', processed_count;
+END;
+$$;
+
+CALL transform_transactions_bronze_to_silver();
