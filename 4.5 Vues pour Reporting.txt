@@ -1,102 +1,76 @@
--- Fonction pour calculer les KPI métier
-CREATE OR REPLACE FUNCTION get_sales_kpi(
-    p_start_date DATE,
-    p_end_date DATE
-)
-RETURNS TABLE (
-    metric_name VARCHAR(50),
-    metric_value NUMERIC,
-    metric_unit VARCHAR(20)
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        'Total Sales'::VARCHAR,
-        SUM(fs.total_amount),
-        'EUR'::VARCHAR
-    FROM fact_sales fs
-    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
-    WHERE dd.date BETWEEN p_start_date AND p_end_date
-    
-    UNION ALL
-    
-    SELECT 
-        'Total Profit',
-        SUM(fs.profit_amount),
-        'EUR'
-    FROM fact_sales fs
-    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
-    WHERE dd.date BETWEEN p_start_date AND p_end_date
-    
-    UNION ALL
-    
-    SELECT 
-        'Avg Transaction Value',
-        AVG(fs.total_amount),
-        'EUR'
-    FROM fact_sales fs
-    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
-    WHERE dd.date BETWEEN p_start_date AND p_end_date
-    
-    UNION ALL
-    
-    SELECT 
-        'Unique Customers',
-        COUNT(DISTINCT fs.customer_key),
-        'customers'
-    FROM fact_sales fs
-    INNER JOIN dim_date dd ON fs.date_key = dd.date_key
-    WHERE dd.date BETWEEN p_start_date AND p_end_date;
-END;
-$$ LANGUAGE plpgsql;
+-- Vue des ventes détaillées
+CREATE VIEW vw_sales_detailed AS
+SELECT 
+    dd.date,
+    dc.customer_name,
+    dc.city AS customer_city,
+    dp.product_name,
+    dp.category,
+    ds.store_name,
+    de.employee_name,
+    fs.transaction_id,
+    fs.quantity,
+    fs.unit_price,
+    fs.discount_amount,
+    fs.total_amount,
+    fs.cost_amount,
+    fs.profit_amount,
+    fs.payment_method
+FROM fact_sales fs
+INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+INNER JOIN dim_customer dc ON fs.customer_key = dc.customer_key
+INNER JOIN dim_product dp ON fs.product_key = dp.product_key
+INNER JOIN dim_store ds ON fs.store_key = ds.store_key
+LEFT JOIN dim_employee de ON fs.employee_key = de.employee_key
+WHERE dc.current_flag = TRUE 
+  AND dp.current_flag = TRUE;
 
--- Fonction pour mettre à jour les SCD
-CREATE OR REPLACE PROCEDURE update_scd_customer()
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    -- Désactiver les anciennes versions
-    UPDATE dim_customer 
-    SET valid_to = CURRENT_TIMESTAMP - INTERVAL '1 second',
-        current_flag = FALSE
-    WHERE current_flag = TRUE
-      AND customer_id IN (
-          SELECT customer_id 
-          FROM dw_silver.silver_customers 
-          WHERE is_active = TRUE
-      );
-    
-    -- Insérer nouvelles versions
-    INSERT INTO dim_customer (
-        customer_id, customer_name, email, city, customer_type,
-        customer_segment, acquisition_date, valid_from, valid_to, current_flag
-    )
-    SELECT 
-        sc.customer_id,
-        sc.first_name || ' ' || sc.last_name,
-        sc.email,
-        sc.city,
-        sc.customer_type,
-        CASE 
-            WHEN sc.customer_type = 'Entreprise' THEN 'Corporate'
-            WHEN sc.city IN ('Paris', 'Lyon') THEN 'Metro'
-            ELSE 'Standard'
-        END,
-        sc.registration_date,
-        CURRENT_TIMESTAMP,
-        '9999-12-31 23:59:59',
-        TRUE
-    FROM dw_silver.silver_customers sc
-    WHERE sc.is_active = TRUE
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM dim_customer dc 
-          WHERE dc.customer_id = sc.customer_id 
-            AND dc.current_flag = TRUE
-            AND dc.email = sc.email
-            AND dc.city = sc.city
-      );
-    
-    RAISE NOTICE 'Dimension Customer SCD mise à jour';
-END;
-$$;
+-- Vue des ventes par jour
+CREATE VIEW vw_daily_sales AS
+SELECT 
+    dd.date,
+    dd.day_name,
+    dd.month_name,
+    dd.year,
+    COUNT(DISTINCT fs.transaction_id) AS nb_transactions,
+    SUM(fs.quantity) AS total_quantity,
+    SUM(fs.total_amount) AS total_sales,
+    SUM(fs.profit_amount) AS total_profit,
+    AVG(fs.total_amount) AS avg_transaction_value
+FROM fact_sales fs
+INNER JOIN dim_date dd ON fs.date_key = dd.date_key
+GROUP BY dd.date, dd.day_name, dd.month_name, dd.year
+ORDER BY dd.date DESC;
+
+-- Vue des meilleurs clients
+CREATE VIEW vw_top_customers AS
+SELECT 
+    dc.customer_name,
+    dc.city,
+    dc.customer_segment,
+    COUNT(DISTINCT fs.transaction_id) AS nb_purchases,
+    SUM(fs.total_amount) AS total_spent,
+    SUM(fs.profit_amount) AS total_profit_generated
+FROM fact_sales fs
+INNER JOIN dim_customer dc ON fs.customer_key = dc.customer_key
+WHERE dc.current_flag = TRUE
+GROUP BY dc.customer_key, dc.customer_name, dc.city, dc.customer_segment
+ORDER BY total_spent DESC
+LIMIT 10;
+
+-- Vue des produits les plus vendus
+CREATE VIEW vw_top_products AS
+SELECT 
+    dp.product_name,
+    dp.category,
+    dp.brand,
+    SUM(fs.quantity) AS total_quantity_sold,
+    SUM(fs.total_amount) AS total_revenue,
+    SUM(fs.profit_amount) AS total_profit,
+    ROUND(AVG(dp.profit_margin), 2) AS avg_profit_margin
+FROM fact_sales fs
+INNER JOIN dim_product dp ON fs.product_key = dp.product_key
+WHERE dp.current_flag = TRUE
+GROUP BY dp.product_key, dp.product_name, dp.category, dp.brand
+ORDER BY total_revenue DESC
+LIMIT 10;
