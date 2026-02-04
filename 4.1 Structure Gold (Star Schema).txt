@@ -1,0 +1,127 @@
+\c dw_gold
+
+-- DIMENSION 1: Date
+CREATE TABLE dim_date (
+    date_key INTEGER PRIMARY KEY,  -- YYYYMMDD
+    date DATE NOT NULL,
+    day INTEGER NOT NULL,
+    day_name VARCHAR(20) NOT NULL,
+    month INTEGER NOT NULL,
+    month_name VARCHAR(20) NOT NULL,
+    quarter INTEGER NOT NULL,
+    quarter_name VARCHAR(10) NOT NULL,
+    year INTEGER NOT NULL,
+    is_weekend BOOLEAN NOT NULL,
+    is_holiday BOOLEAN DEFAULT FALSE,
+    holiday_name VARCHAR(50),
+    CONSTRAINT unique_date UNIQUE (date)
+);
+
+-- DIMENSION 2: Customer (SCD Type 2)
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) NOT NULL,
+    customer_name VARCHAR(200) NOT NULL,
+    email VARCHAR(255),
+    city VARCHAR(100),
+    region VARCHAR(100),
+    country VARCHAR(50) DEFAULT 'France',
+    customer_type VARCHAR(20),
+    customer_segment VARCHAR(30),
+    acquisition_date DATE,
+    is_active BOOLEAN DEFAULT TRUE,
+    valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    valid_to TIMESTAMP DEFAULT '9999-12-31 23:59:59',
+    current_flag BOOLEAN DEFAULT TRUE
+);
+
+-- DIMENSION 3: Product (SCD Type 2)
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) NOT NULL,
+    product_name VARCHAR(200) NOT NULL,
+    category VARCHAR(100),
+    brand VARCHAR(100),
+    supplier VARCHAR(100),
+    unit_price DECIMAL(10,2),
+    cost_price DECIMAL(10,2),
+    profit_margin DECIMAL(5,2),
+    stock_level INTEGER,
+    is_active BOOLEAN DEFAULT TRUE,
+    launch_date DATE,
+    valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    valid_to TIMESTAMP DEFAULT '9999-12-31 23:59:59',
+    current_flag BOOLEAN DEFAULT TRUE
+);
+
+-- DIMENSION 4: Store
+CREATE TABLE dim_store (
+    store_key SERIAL PRIMARY KEY,
+    store_id VARCHAR(50) NOT NULL,
+    store_name VARCHAR(200),
+    store_type VARCHAR(50),
+    city VARCHAR(100),
+    region VARCHAR(100),
+    country VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- DIMENSION 5: Employee
+CREATE TABLE dim_employee (
+    employee_key SERIAL PRIMARY KEY,
+    employee_id VARCHAR(50) NOT NULL,
+    employee_name VARCHAR(200),
+    store_key INTEGER,
+    is_active BOOLEAN DEFAULT TRUE,
+    CONSTRAINT fk_store FOREIGN KEY (store_key) REFERENCES dim_store(store_key)
+);
+
+-- FACT TABLE: Sales
+CREATE TABLE fact_sales (
+    sales_key BIGSERIAL PRIMARY KEY,
+    date_key INTEGER NOT NULL,
+    customer_key INTEGER NOT NULL,
+    product_key INTEGER NOT NULL,
+    store_key INTEGER,
+    employee_key INTEGER,
+    transaction_id VARCHAR(50) NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price DECIMAL(10,2) NOT NULL,
+    discount_amount DECIMAL(10,2) DEFAULT 0,
+    total_amount DECIMAL(12,2) NOT NULL,
+    cost_amount DECIMAL(12,2),
+    profit_amount DECIMAL(12,2),
+    payment_method VARCHAR(50),
+    source_system VARCHAR(50),
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Foreign Keys
+    CONSTRAINT fk_date FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
+    CONSTRAINT fk_customer FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
+    CONSTRAINT fk_product FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
+    CONSTRAINT fk_store FOREIGN KEY (store_key) REFERENCES dim_store(store_key),
+    CONSTRAINT fk_employee FOREIGN KEY (employee_key) REFERENCES dim_employee(employee_key)
+);
+
+-- Indexes pour performances
+CREATE INDEX idx_fact_sales_date ON fact_sales(date_key);
+CREATE INDEX idx_fact_sales_customer ON fact_sales(customer_key);
+CREATE INDEX idx_fact_sales_product ON fact_sales(product_key);
+CREATE INDEX idx_fact_sales_store ON fact_sales(store_key);
+CREATE INDEX idx_fact_sales_transaction ON fact_sales(transaction_id);
+
+-- Table agrégée pour reporting
+CREATE TABLE agg_daily_sales (
+    date_key INTEGER,
+    customer_key INTEGER,
+    product_key INTEGER,
+    store_key INTEGER,
+    total_transactions INTEGER,
+    total_quantity INTEGER,
+    total_amount DECIMAL(15,2),
+    total_cost DECIMAL(15,2),
+    total_profit DECIMAL(15,2),
+    avg_transaction_value DECIMAL(10,2),
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (date_key, customer_key, product_key, store_key)
+);
