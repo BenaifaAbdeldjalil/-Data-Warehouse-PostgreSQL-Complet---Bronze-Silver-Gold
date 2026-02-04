@@ -1,3 +1,4 @@
+---Transactions (format JSONB)
 INSERT INTO bronze_transactions (source_system, raw_data, file_name, status) VALUES
 ('pos_system', 
 '{
@@ -109,3 +110,112 @@ INSERT INTO bronze_transactions (source_system, raw_data, file_name, status) VAL
 }',
 'online_sales_20240316.json',
 'loaded');
+
+-------Clients (format CSV)
+
+INSERT INTO bronze_customers (source_file, customer_data) VALUES
+('clients_20240315.csv', 'customer_id:C101;first_name:Jean;last_name:Dupont;email:jean.dupont@email.com;phone:0612345678;city:Paris;country:France;registration_date:2023-01-15;customer_type:Particulier'),
+('clients_20240315.csv', 'customer_id:C102;first_name:Marie;last_name:Martin;email:marie.m@entreprise.com;phone:0623456789;city:Lyon;country:France;registration_date:2023-02-20;customer_type:Entreprise'),
+('clients_20240315.csv', 'customer_id:C103;first_name:Pierre;last_name:Bernard;email:pierre.b@gmail.com;phone:0634567890;city:Marseille;country:France;registration_date:2023-03-10;customer_type:Particulier'),
+('clients_20240315.csv', 'customer_id:C104;first_name:Sophie;last_name:Leroy;email:sophie.leroy@yahoo.com;phone:0645678901;city:Paris;country:France;registration_date:2023-04-05;customer_type:Particulier'),
+('clients_20240315.csv', 'customer_id:C105;first_name:Thomas;last_name:Petit;email:thomas.p@hotmail.com;phone:0656789012;city:Lille;country:France;registration_date:2023-05-12;customer_type:Entreprise');
+
+
+
+----Produits (format JSONB)
+
+INSERT INTO bronze_products (api_source, json_data, http_status) VALUES
+('product_api', 
+'{
+    "product_id": "P001",
+    "product_name": "iPhone 15 Pro",
+    "category": "Smartphones",
+    "brand": "Apple",
+    "supplier": "Apple France",
+    "unit_price": 1199.99,
+    "cost_price": 899.99,
+    "stock_quantity": 45,
+    "min_stock": 10,
+    "reorder_quantity": 50,
+    "weight_kg": 0.187,
+    "dimensions": "146.7x71.5x7.85mm",
+    "color": "Titan Naturel",
+    "release_date": "2023-09-22"
+}',
+200),
+
+('product_api',
+'{
+    "product_id": "P002",
+    "product_name": "MacBook Air M2",
+    "category": "Ordinateurs",
+    "brand": "Apple",
+    "supplier": "Apple France",
+    "unit_price": 1299.99,
+    "cost_price": 999.99,
+    "stock_quantity": 32,
+    "min_stock": 5,
+    "reorder_quantity": 30,
+    "weight_kg": 1.24,
+    "dimensions": "30.41x21.5x1.13cm",
+    "color": "Minuit",
+    "release_date": "2022-07-15"
+}',
+200),
+
+('product_api',
+'{
+    "product_id": "P003",
+    "product_name": "Samsung TV QLED 55\"",
+    "category": "Téléviseurs",
+    "brand": "Samsung",
+    "supplier": "Samsung Electronics",
+    "unit_price": 799.99,
+    "cost_price": 599.99,
+    "stock_quantity": 18,
+    "min_stock": 3,
+    "reorder_quantity": 20,
+    "weight_kg": 17.5,
+    "dimensions": "123.2x71.3x27.5cm",
+    "color": "Noir",
+    "release_date": "2023-01-10"
+}',
+200),
+
+('product_api',
+'{
+    "product_id": "P004",
+    "product_name": "Casque Sony WH-1000XM5",
+    "category": "Audio",
+    "brand": "Sony",
+    "supplier": "Sony France",
+    "unit_price": 199.99,
+    "cost_price": 149.99,
+    "stock_quantity": 67,
+    "min_stock": 15,
+    "reorder_quantity": 50,
+    "weight_kg": 0.25,
+    "dimensions": "20x17x8cm",
+    "color": "Noir",
+    "release_date": "2022-05-19"
+}',
+200),
+
+('product_api',
+'{
+    "product_id": "P005",
+    "product_name": "Livre PostgreSQL Avancé",
+    "category": "Livres",
+    "brand": "Éditions ENI",
+    "supplier": "ENI Publishing",
+    "unit_price": 39.99,
+    "cost_price": 19.99,
+    "stock_quantity": 125,
+    "min_stock": 20,
+    "reorder_quantity": 100,
+    "weight_kg": 0.85,
+    "dimensions": "17x24x2cm",
+    "color": "-",
+    "release_date": "2023-11-05"
+}',
+200);
