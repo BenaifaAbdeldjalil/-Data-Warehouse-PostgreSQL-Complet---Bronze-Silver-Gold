@@ -1,0 +1,83 @@
+-- Script pour exécuter tout le pipeline ETL
+CREATE OR REPLACE PROCEDURE run_etl_pipeline()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE NOTICE 'Début du pipeline ETL à %', CURRENT_TIMESTAMP;
+    
+    -- Étape 1: Transformation Bronze → Silver
+    RAISE NOTICE 'Étape 1: Transformation Bronze → Silver';
+    CALL dw_silver.transform_customers_bronze_to_silver();
+    CALL dw_silver.transform_products_bronze_to_silver();
+    CALL dw_silver.transform_transactions_bronze_to_silver();
+    
+    -- Étape 2: Transformation Silver → Gold
+    RAISE NOTICE 'Étape 2: Transformation Silver → Gold';
+    CALL dw_gold.update_scd_customer();
+    
+    -- Étape 3: Rafraîchir Fact Table
+    RAISE NOTICE 'Étape 3: Mise à jour des faits';
+    
+    -- Insérer nouvelles transactions
+    INSERT INTO dw_gold.fact_sales (
+        date_key, customer_key, product_key, store_key, employee_key,
+        transaction_id, quantity, unit_price, discount_amount, total_amount,
+        cost_amount, profit_amount, payment_method, source_system
+    )
+    SELECT 
+        dd.date_key,
+        dc.customer_key,
+        dp.product_key,
+        ds.store_key,
+        de.employee_key,
+        st.transaction_id,
+        st.quantity,
+        st.unit_price,
+        st.discount_amount,
+        st.total_amount,
+        dp.cost_price * st.quantity AS cost_amount,
+        st.total_amount - (dp.cost_price * st.quantity) AS profit_amount,
+        st.payment_method,
+        st.source_system
+    FROM dw_silver.silver_transactions st
+    INNER JOIN dw_gold.dim_date dd ON DATE(st.transaction_date) = dd.date
+    INNER JOIN dw_gold.dim_customer dc ON st.customer_sk = dc.customer_key
+    INNER JOIN dw_gold.dim_product dp ON st.product_sk = dp.product_key
+    INNER JOIN dw_gold.dim_store ds ON st.store_id = ds.store_id
+    LEFT JOIN dw_gold.dim_employee de ON st.employee_id = de.employee_id
+    WHERE NOT EXISTS (
+        SELECT 1 
+        FROM dw_gold.fact_sales fs 
+        WHERE fs.transaction_id = st.transaction_id
+    );
+    
+    -- Étape 4: Mettre à jour les agrégats
+    RAISE NOTICE 'Étape 4: Mise à jour des agrégats';
+    
+    TRUNCATE TABLE dw_gold.agg_daily_sales;
+    
+    INSERT INTO dw_gold.agg_daily_sales (
+        date_key, customer_key, product_key, store_key,
+        total_transactions, total_quantity, total_amount,
+        total_cost, total_profit, avg_transaction_value
+    )
+    SELECT 
+        date_key,
+        customer_key,
+        product_key,
+        store_key,
+        COUNT(*) AS total_transactions,
+        SUM(quantity) AS total_quantity,
+        SUM(total_amount) AS total_amount,
+        SUM(cost_amount) AS total_cost,
+        SUM(profit_amount) AS total_profit,
+        AVG(total_amount) AS avg_transaction_value
+    FROM dw_gold.fact_sales
+    GROUP BY date_key, customer_key, product_key, store_key;
+    
+    RAISE NOTICE 'Pipeline ETL terminé à %', CURRENT_TIMESTAMP;
+END;
+$$;
+
+-- Exécuter le pipeline complet
+CALL run_etl_pipeline();
