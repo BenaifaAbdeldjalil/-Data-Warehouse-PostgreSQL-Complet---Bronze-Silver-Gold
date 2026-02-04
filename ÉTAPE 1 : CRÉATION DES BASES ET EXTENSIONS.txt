@@ -1,0 +1,14 @@
+-- 1. Créer les bases de données
+CREATE DATABASE dw_bronze;
+CREATE DATABASE dw_silver;
+CREATE DATABASE dw_gold;
+
+-- 2. Se connecter à chaque base et créer les extensions
+\c dw_bronze
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+\c dw_silver
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+\c dw_gold
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
